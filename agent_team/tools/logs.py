@@ -113,14 +113,14 @@ def query_device_logs(
 # Example usage (can be removed when integrating into larger codebase)
 if __name__ == "__main__":
     # Query without time range
-    print(query_transaction_status("sensor-A"))
+    print(query_device_logs("sensor-A"))
 
     # Query with ISO string time range (last 1 hour)
     one_hour_ago = (datetime.now() - timedelta(hours=1)).isoformat()
     now_iso = datetime.now().isoformat()
     print(
-        query_transaction_status("sensor-A", start_time=one_hour_ago, end_time=now_iso)
+        query_device_logs("sensor-A", start_time=one_hour_ago, end_time=now_iso)
     )
 
     # Device with no records
-    print(query_transaction_status("edge-12"))
+    print(query_device_logs("edge-12"))
