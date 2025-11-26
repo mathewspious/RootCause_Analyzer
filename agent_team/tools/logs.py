@@ -102,7 +102,7 @@ def query_device_logs(
             return False
         return True
 
-    matched = [ _serialize_tx(tx) for tx in records if matches(tx) ]
+    matched = [_serialize_tx(tx) for tx in records if matches(tx)]
 
     if not matched:
         return {"device": device, "status": "no result found"}
@@ -118,7 +118,9 @@ if __name__ == "__main__":
     # Query with ISO string time range (last 1 hour)
     one_hour_ago = (datetime.now() - timedelta(hours=1)).isoformat()
     now_iso = datetime.now().isoformat()
-    print(query_transaction_status("sensor-A", start_time=one_hour_ago, end_time=now_iso))
+    print(
+        query_transaction_status("sensor-A", start_time=one_hour_ago, end_time=now_iso)
+    )
 
     # Device with no records
     print(query_transaction_status("edge-12"))

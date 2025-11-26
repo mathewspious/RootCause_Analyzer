@@ -234,6 +234,7 @@ def create_ticket(
         external_link=f"https://itsm.example/tickets/{ticket_id}",
     )
     _TICKETS[ticket_id] = ticket
+
     logger.info("Created ticket %s", ticket_id)
     return {
         "status": "created",

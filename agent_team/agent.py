@@ -4,7 +4,8 @@ from google.adk.agents.llm_agent import Agent
 from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.sessions import InMemorySessionService
-from google.adk.runners import Runner
+from google.adk.runners import Runner, InMemoryRunner
+from google.adk.apps.app import App, ResumabilityConfig
 from google.adk.planners import BuiltInPlanner
 from google.genai import types
 from .tools.itsm import check_changes, check_ticket, create_ticket, search_tickets_by_ci
@@ -26,9 +27,9 @@ from arize.otel import register
 
 # Register with Arize AX
 tracer_provider = register(
-    space_id=os.getenv("SPACE_ID"),      # Found in app space settings page
-    api_key=os.getenv("API_KEY"),        # Found in app space settings page
-    project_name="RCA_Helper"  # Name this whatever you prefer
+    space_id=os.getenv("SPACE_ID"),  # Found in app space settings page
+    api_key=os.getenv("API_KEY"),  # Found in app space settings page
+    project_name="RCA_Helper",  # Name this whatever you prefer
 )
 
 # Import and configure the automatic instrumentor from OpenInference
@@ -50,13 +51,8 @@ retry_config = types.HttpRetryOptions(
     http_status_codes=[429, 500, 503, 504],  # Retry on these HTTP errors
 )
 
-thinking_config = types.ThinkingConfig(
-    include_thoughts=True,
-    thinking_budget=256
-)
-planner=BuiltInPlanner(
-    thinking_config=thinking_config
-)
+thinking_config = types.ThinkingConfig(include_thoughts=True, thinking_budget=256)
+planner = BuiltInPlanner(thinking_config=thinking_config)
 ## Define agents
 itsm_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
@@ -175,7 +171,7 @@ Do not perform any other actions.""",
 
 
 logs_agent = Agent(
-    model=Gemini(model='gemini-2.5-flash', retry_options=retry_config),
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="logs_agent",
     instruction="""You are a logs retrieval assistant.
 You have access to only one tool:
@@ -187,11 +183,11 @@ You have access to only one tool:
 Use the 'query_device_logs' tool when the user requests device logs.""",
     description="Retrieves device logs for devices.",
     planner=planner,
-    tools=[query_device_logs]
+    tools=[query_device_logs],
 )
 
 logs_health_agent = Agent(
-    model=Gemini(model='gemini-2.5-flash', retry_options=retry_config),
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="logs_health_agent",
     instruction="""You are a logs retrieval assistant.
 You have access to only one tool:
@@ -211,14 +207,14 @@ If NO critical logs are found, return:
 Use the 'query_device_logs' tool when the user requests device logs.""",
     description="Retrieves device logs for devices.",
     planner=planner,
-    tools=[query_device_logs]
+    tools=[query_device_logs],
 )
 
 parallel_health_check_executor = ParallelAgent(
     name="parallel_health_check_executor",
     description="Performs a comprehensive device health check by querying ITSM, Logs, and Transactions simultaneously. Use this for requests like 'How is device X?', 'Quick check', or 'Status report'.",
     # The ParallelAgent will run these 3 asynchronously
-    sub_agents=[itsm_health_agent, transaction_health_agent, logs_health_agent]
+    sub_agents=[itsm_health_agent, transaction_health_agent, logs_health_agent],
 )
 
 # 2. The Synthesis Agent
@@ -271,8 +267,8 @@ health_check_agent = SequentialAgent(
     # The sub_agents list defines the sequence of execution
     sub_agents=[
         parallel_health_check_executor,  # Step 1: Execute all checks in parallel
-        summary_agent,                   # Step 2: Summarize the output from Step 1
-    ]
+        summary_agent,  # Step 2: Summarize the output from Step 1
+    ],
 )
 
 root_agent = Agent(
@@ -304,19 +300,28 @@ root_agent = Agent(
 If a request is ambiguous, ask for clarification. Do not invent answers.""",
     planner=planner,
     # Health Check is added to the sub-agents list
-    sub_agents=[greeting_agent, farewell_agent, itsm_agent, transaction_agent, logs_agent, health_check_agent],
+    sub_agents=[
+        greeting_agent,
+        farewell_agent,
+        itsm_agent,
+        transaction_agent,
+        logs_agent,
+        health_check_agent,
+    ],
     output_key="last_response",
     before_model_callback=block_keyword_guardrail,
-    before_tool_callback=block_tool_guardrail
+    before_tool_callback=block_tool_guardrail,
 )
 
 ## Initial state
 initial_state = {}
 
+
 def _create_session():
-    return  session_service.create_session(
+    return session_service.create_session(
         app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID, state=initial_state
     )
+
 
 session = _create_session()
 # Pass the session *service* to Runner (not a single session object).
