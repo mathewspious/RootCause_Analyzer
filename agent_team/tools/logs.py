@@ -69,23 +69,23 @@ def _serialize_tx(tx: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def query_transaction_logs(
+def query_device_logs(
     device: str, start_time: Optional[Any] = None, end_time: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
-    Mock API call to a distributed logging system returning transaction details.
+    Mock API call to a distributed logging system returning device log details.
 
     Parameters:
     - device: one of "sensor-A", "sensor-B", "gateway-1", "edge-12"
-    - start_time / end_time: optional, datetime or ISO8601 string. If provided, transactions will be
+    - start_time / end_time: optional, datetime or ISO8601 string. If provided, logs will be
       filtered to those that start on/after start_time and end on/before end_time.
 
     Returns:
     - dict with keys:
       - "device": device name
-      - "transactions": list of transactions (each has start_time, end_time, transaction_id, status, response_time_ms)
+      - "logs": list of logs (each has start_time, end_time, transaction_id, status, response_time_ms)
       OR
-      - "device": device, "status": "no result found" if no matching transactions.
+      - "device": device, "status": "no result found" if no matching logs.
     """
     if device not in ALLOWED_DEVICES:
         raise ValueError(f"unsupported device: {device!r}")

@@ -1,7 +1,7 @@
 import os
 import asyncio
 from google.adk.agents.llm_agent import Agent
-from google.adk.agents import SequentialAgent
+from google.adk.agents import ParallelAgent, SequentialAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
@@ -9,7 +9,7 @@ from google.adk.planners import BuiltInPlanner
 from google.genai import types
 from .tools.itsm import check_changes, check_ticket, create_ticket, search_tickets_by_ci
 from .tools.transactions import list_transaction_ids_by_device, get_transaction_details
-from .tools.logs import query_transaction_logs
+from .tools.logs import query_device_logs
 from .tools.goodbye import say_goodbye
 from .tools.greetings import say_hello
 from .callbacks.before_model import block_keyword_guardrail
@@ -70,21 +70,77 @@ You have access to the following tools only:
 - search_tickets_by_ci: Search for tickets related to specific configuration items
 
 Only use these tools to help users with ITSM-related requests. If a request is outside the scope of these tools, inform the user that you cannot perform that action.""",
+    planner=planner,
     tools=[check_changes, check_ticket, create_ticket, search_tickets_by_ci],
+    output_key="last_itsm_response",
+)
+
+itsm_health_agent = Agent(
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
+    name="itsm_health_agent",
+    description="Handles ITSM operations including ticket status checks, change verification, ticket creation, and CI-based ticket searches.",
+    instruction="""You are an IT Service Management (ITSM) assistant.
+You have access to the following tools:
+- check_ticket: Check the status of existing tickets
+- check_changes: Verify changes for configuration items
+- search_tickets_by_ci: Search for tickets related to specific configuration items
+
+**CONTEXT HANDLING:**
+- **If the user (or a parent agent) asks for a "Health Check", "Status Check", or "Device Check":** You MUST automatically use `search_tickets_by_ci` to find open incidents for that device and use `check_changes` to see if there is any changes in progress.
+
+### OUTPUT REQUIREMENT FOR HEALTH CHECKS:
+When returning data to the parent agent, you must provide a detailed summary of **open/recent incidents** related to the device.
+
+If tickets are found, use this structured format:
+[{'ticket_id': 'INC12345', 'status': 'Open - P2', 'summary': 'Network connectivity loss in DC', 'created_date': '2025-11-25'}, ...]
+
+If NO tickets are found, return:
+"ITSM_CHECK_RESULT: No open incidents or recent changes found."
+
+Only use these tools to help users with ITSM-related requests.""",
+    planner=planner,
+    tools=[check_changes, search_tickets_by_ci],
     output_key="last_itsm_response",
 )
 
 transaction_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="transaction_agent",
-    description="Retrieves transaction-related information for devices.",
+    description="Retrieves transaction-related information for devices from the database.",
     instruction="""You are a transaction retrieval assistant.
 You have access to the following tools only:
 - list_transaction_ids_by_device: Retrieve transaction IDs associated with a specific device
 - get_transaction_details: Retrieve detailed information about a specific transaction
 
 Only use these tools to help users retrieve transaction data. If a request is outside the scope of these tools, inform the user that you cannot perform that action.""",
+    planner=planner,
     tools=[list_transaction_ids_by_device, get_transaction_details],
+    output_key="last_transaction_response",
+    before_tool_callback=block_tool_guardrail,
+)
+
+transaction_health_agent = Agent(
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
+    name="transaction_health_agent",
+    description="Retrieves transaction-related information for devices from the database.",
+    instruction="""You are a transaction retrieval assistant.
+You have access to the following tools:
+- list_transaction_ids_by_device: Retrieve transaction IDs associated with a specific device
+
+**CONTEXT HANDLING:**
+- **If the user (or a parent agent) asks for a "Health Check" or "Device Check":** You MUST use `list_transaction_ids_by_device` to see if traffic is flowing.
+### OUTPUT REQUIREMENT FOR HEALTH CHECKS:
+You must provide a structured summary of the transaction flow.
+
+Return data in this structured format:
+{'time_window_checked': 'Last 24 hours', 'total_transactions_found': 150, 'status': 'Nominal', 'sample_ids': ['TXN1A', 'TXN1B']}
+
+If NO transactions are found, return:
+"TRANSACTION_CHECK_RESULT: Zero transactions found in the last 24 hours."
+
+Only use these tools to help users retrieve transaction data.""",
+    planner=planner,
+    tools=[list_transaction_ids_by_device],
     output_key="last_transaction_response",
     before_tool_callback=block_tool_guardrail,
 )
@@ -99,6 +155,7 @@ You have access to only one tool:
 Use the 'say_hello' tool to create an appropriate greeting. If the user provides their name, pass it to the tool.
 Do not engage in any other conversations or tasks.""",
     description="Generates friendly greetings for users.",
+    planner=planner,
     tools=[say_hello],
 )
 
@@ -112,45 +169,142 @@ You have access to only one tool:
 Use the 'say_goodbye' tool when the user indicates they are leaving or ending the conversation.
 Do not perform any other actions.""",
     description="Generates polite goodbye messages for users.",
+    planner=planner,
     tools=[say_goodbye],
 )
+
 
 logs_agent = Agent(
     model=Gemini(model='gemini-2.5-flash', retry_options=retry_config),
     name="logs_agent",
-    instruction="""You are a logs retrieval assistant. Your sole responsibility is to fetch transaction logs for devices.
+    instruction="""You are a logs retrieval assistant.
 You have access to only one tool:
-- query_transaction_logs: Retrieve transaction logs for a specific device
+- query_device_logs: Retrieve device logs for a specific device
 
-Use the 'query_transaction_logs' tool when the user requests device logs or transaction history.
-Do not perform any other actions.""",
-    description="Retrieves transaction logs for devices.",
-    tools=[query_transaction_logs]
+**CONTEXT HANDLING:**
+- **If the user (or a parent agent) asks for a "Health Check" or "Device Check":** You MUST use `query_device_logs` to fetch recent error logs.
+
+Use the 'query_device_logs' tool when the user requests device logs.""",
+    description="Retrieves device logs for devices.",
+    planner=planner,
+    tools=[query_device_logs]
 )
 
-# health_check_agent =SequentialAgent(
-#     name="health_check_agent",
-#     sub_agents=[itsm_agent, transaction_agent, logs_agent],
-#     description="executes a high level system health check/ summary check based on a device. Thin includes ITSM system, transaction Database and logs system"
-# )
+logs_health_agent = Agent(
+    model=Gemini(model='gemini-2.5-flash', retry_options=retry_config),
+    name="logs_health_agent",
+    instruction="""You are a logs retrieval assistant.
+You have access to only one tool:
+- query_device_logs: Retrieve device logs for a specific device
+
+**CONTEXT HANDLING:**
+- **If the user (or a parent agent) asks for a "Health Check" or "Device Check":** You MUST use `query_device_logs` to fetch recent error logs.
+### OUTPUT REQUIREMENT FOR HEALTH CHECKS:
+You must provide a structured list of the critical logs found.
+
+If logs are found, use this structured format:
+[{'timestamp': '2025-11-26 10:01:05', 'level': 'ERROR', 'message': 'DB Connection Timeout'}, {'timestamp': '2025-11-26 10:00:50', 'level': 'CRITICAL', 'message': 'Process [PID 55] terminated'}, ...]
+
+If NO critical logs are found, return:
+"LOGS_CHECK_RESULT: No critical or error logs found in the recent history."
+
+Use the 'query_device_logs' tool when the user requests device logs.""",
+    description="Retrieves device logs for devices.",
+    planner=planner,
+    tools=[query_device_logs]
+)
+
+parallel_health_check_executor = ParallelAgent(
+    name="parallel_health_check_executor",
+    description="Performs a comprehensive device health check by querying ITSM, Logs, and Transactions simultaneously. Use this for requests like 'How is device X?', 'Quick check', or 'Status report'.",
+    # The ParallelAgent will run these 3 asynchronously
+    sub_agents=[itsm_health_agent, transaction_health_agent, logs_health_agent]
+)
+
+# 2. The Synthesis Agent
+summary_agent = Agent(
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
+    name="summary_agent",
+    description="Analyzes and summarizes the raw output from the parallel health checks into a detailed final report.",
+    instruction="""You are a Senior Device Health Auditor. Your responsibility is to analyze the raw, parallel-executed data provided to you and synthesize it into a professional, detailed health check report.
+
+The input data you receive contains the separate outputs from the ITSM, Transaction, and Logs agents.
+
+### ANALYSIS STEPS:
+1.  **Extract Key Findings:** Identify the most relevant data points (e.g., specific error codes, ticket IDs, transaction counts).
+2.  **Correlate Data:** Determine if findings are related. Explicitly state any direct link found between tickets, logs, and transaction failures.
+3.  **Synthesize Status:** Translate the raw data into a clear business impact.
+
+### FINAL OUTPUT TEMPLATE (Must be strictly followed):
+**Detailed Device Health Report for [Inferred Device Name]**
+---
+**1. 🎫 ITSM Status Assessment**
+* **Key Finding:** [List any open tickets/changes by ID or summary. If none, state clearly.]
+* **Time Since Last Incident:** [Provide relevant context if possible.]
+
+**2. 📊 Transaction Health & Flow**
+* **Key Finding:** [Report total number of transactions found. If zero, highlight the period checked.]
+* **Status Verdict:** [Healthy/Warning based on transaction flow.]
+
+**3. 📜 System Logs Deep Dive**
+* **Key Finding:** [List the most recent 2-3 critical errors found, including timestamps if available.]
+* **Impact Summary:** [Describe the likely impact of the log errors.]
+
+**4. 🔗 Cross-System Correlation**
+* **Summary:** [State any direct links found between the three data sources. If no correlation, state "No direct correlation observed."]
+
+**5. 📈 Final Executive Assessment**
+* **Overall Health Rating:** **[CRITICAL / WARNING / HEALTHY]**
+* **Recommended Next Step:** [Suggest the most logical action based on the summary.]
+""",
+    planner=planner,
+    # This agent uses its LLM to summarize, so it requires no tools.
+    tools=[],
+    output_key="final_health_report",
+)
+
+
+# 3. The Sequential Wrapper Agent
+health_check_agent = SequentialAgent(
+    name="health_check_agent",
+    description="Performs a complete, two-step device health check: parallel data gathering followed by detailed summary creation. Use this for all general status and health report requests.",
+    # The sub_agents list defines the sequence of execution
+    sub_agents=[
+        parallel_health_check_executor,  # Step 1: Execute all checks in parallel
+        summary_agent,                   # Step 2: Summarize the output from Step 1
+    ]
+)
+
 root_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="rca_agent",
-    description="Main coordinator agent that routes requests to specialized agents for ITSM, transactions, logs, greetings, and farewells.",
-    instruction="""You are the main coordinator agent. Your role is to analyze user queries and delegate them to the appropriate specialized agent.
+    description="Main coordinator agent.",
+    instruction="""You are the main coordinator. Route user queries to the correct specialized agent.
 
-Available specialized agents:
-1. 'greeting_agent': Use this agent when the user starts a conversation or greets you
-2. 'farewell_agent': Use this agent when the user indicates they are leaving or ending the conversation
-3. 'itsm_agent': Use this agent for ITSM-related activities (ticket checks, change verification, ticket creation, CI searches)
-4. 'transaction_agent': Use this agent for queries about transactions and transaction details
-5. 'logs_agent': Use this agent when the user requests device server logs
+### ROUTING LOGIC:
+1.  **General Status / Health Checks:**
+    - Triggers: "Check device X", "How is X doing?", "Status of X", "Health report".
+    - Action: Route to `health_check_agent`.
 
-Analyze each user query carefully and delegate to the most appropriate agent based on their request.
-If a request does not match any agent's capabilities, politely inform the user that you cannot assist with that request.
-Do not attempt to fulfill requests outside the scope of the available agents.""",
+2.  **Specific ITSM Tasks:**
+    - Triggers: "Create ticket", "Search for ticket #123", "ticket for CI #343".
+    - Action: Route to `itsm_agent`.
+
+3.  **Specific Transaction Tasks:**
+    - Triggers: "Get details for transaction #ABC", "Get transactions for #124".
+    - Action: Route to `transaction_agent`.
+
+4.  **Specific Log Tasks:**
+    - Triggers: "Show me the logs".
+    - Action: Route to `logs_agent`.
+
+5.  **Social:**
+    - Action: Route to `greeting_agent` or `farewell_agent`.
+
+If a request is ambiguous, ask for clarification. Do not invent answers.""",
     planner=planner,
-    sub_agents=[greeting_agent, farewell_agent, itsm_agent, transaction_agent, logs_agent],
+    # Health Check is added to the sub-agents list
+    sub_agents=[greeting_agent, farewell_agent, itsm_agent, transaction_agent, logs_agent, health_check_agent],
     output_key="last_response",
     before_model_callback=block_keyword_guardrail,
     before_tool_callback=block_tool_guardrail
@@ -158,12 +312,6 @@ Do not attempt to fulfill requests outside the scope of the available agents."""
 
 ## Initial state
 initial_state = {}
-
-## Create a specific session service for the agents
-# async def _create_session():
-#     return await session_service.create_session(
-#         app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID, state=initial_state
-#     )
 
 def _create_session():
     return  session_service.create_session(
@@ -174,76 +322,3 @@ session = _create_session()
 # Pass the session *service* to Runner (not a single session object).
 # Runner expects a SessionService implementation with a `get_session` method.
 runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
-
-
-# async def run_agent(query: str, runner, user_id, session_id):
-#     """Sends a query to the agent and print final response"""
-#     print(f"User query: {query}")
-
-#     # Prepare the users's query to the agent and prints the final reponse
-#     content = types.Content(role="user", parts=[types.Part(text=query)])
-#     print(f"Content: {content}")
-#     final_response_text = "Agent did not produce a final response."
-
-#     async for event in runner.run_async(
-#         user_id=user_id, session_id=session_id, new_message=content
-#     ):
-#         # print(f"  [Event] Author: {event.author}, Type: {type(event).__name__}, Final: {event.is_final_response()}, Content: {event.content}")
-#         if event.is_final_response():
-#             if event.content and event.content.parts:
-#                 final_response_text = event.content.parts[0].text
-#             elif event.actions and event.actions.escalate:
-#                 final_response_text = (
-#                     f"Agent escalated: {event.error_message or 'No Specific Message'}"
-#                 )
-
-#             break
-#     print(f"Agent Response: {final_response_text}")
-
-
-# async def run_conversation():
-#     print("Starting conversation with agent...")
-#     print("Type 'exit' to end the conversation.\n")
-
-#     while True:
-#         # Get user input
-#         user_message = input("You: ").strip()
-
-#         # Check if user wants to exit
-#         if user_message.lower() == "exit":
-#             print("Ending conversation.")
-#             break
-
-#         # Skip empty input
-#         if not user_message:
-#             print("Please enter a message.\n")
-#             continue
-
-#         # Run the agent with user input
-#         try:
-#             await run_agent(
-#                 user_message, runner=runner, user_id=USER_ID, session_id=SESSION_ID
-#             )
-#         except Exception as e:
-#             print(f"Error processing message: {e}\n")
-
-#     # final_session = await session_service.get_session(
-#     #     app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID
-#     # )
-#     # if final_session:
-#     #     print(
-#     #         f"Final Preference: {final_session.state.get('last_itsm_response', 'last_itsm_response Not Set')}"
-#     #     )
-#     #     print(
-#     #         f"Final Preference: {final_session.state.get('last_transaction_response', 'last_transaction_response Not Set')}"
-#     #     )
-#     #     print(
-#     #         f"Final Preference: {final_session.state.get('last_response', 'last_response Not Set')}"
-#     #     )
-
-
-# if __name__ == "__main__":
-#     try:
-#         asyncio.run(run_conversation())
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
