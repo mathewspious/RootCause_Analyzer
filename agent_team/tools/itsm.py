@@ -74,7 +74,7 @@ def _seed_data():
         id="TCKT-1001",
         summary="Database connection errors observed",
         description="Intermittent connection failures to DB-Prod cluster.",
-        ci_name="db-prod-cluster",
+        ci_name="sensor-B",
         priority="High",
         status="Open",
         reporter="ops-monitor",
@@ -86,7 +86,7 @@ def _seed_data():
         id="TCKT-1002",
         summary="Planned network maintenance",
         description="Network team will perform maintenance on routers",
-        ci_name="router-edge-1",
+        ci_name="sensor-A",
         priority="Low",
         status="Closed",
         reporter="net-team",
@@ -100,7 +100,7 @@ def _seed_data():
     # Create two change records
     c1 = ChangeRecord(
         id="CHG-2001",
-        ci_name="db-prod-cluster",
+        ci_name="sensor-B",
         change_type="configuration",
         description="Updated DB connection pool parameters",
         changed_at=(datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(),
@@ -108,9 +108,9 @@ def _seed_data():
     )
     c2 = ChangeRecord(
         id="CHG-2002",
-        ci_name="web-app-01",
+        ci_name="sensor-A",
         change_type="deploy",
-        description="Deployed v2.3.1 to web-app-01",
+        description="Deployed v2.3.1 to sensor-A",
         changed_at=(
             datetime.now(timezone.utc) - timedelta(days=1, hours=2)
         ).isoformat(),
