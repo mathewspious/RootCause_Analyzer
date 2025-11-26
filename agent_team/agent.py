@@ -5,6 +5,7 @@ from google.adk.agents import SequentialAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
+from google.adk.planners import BuiltInPlanner
 from google.genai import types
 from .tools.itsm import check_changes, check_ticket, create_ticket, search_tickets_by_ci
 from .tools.transactions import list_transaction_ids_by_device, get_transaction_details
@@ -21,6 +22,21 @@ warnings.filterwarnings("ignore")
 ## Code to read .env file to set environment variables
 load_dotenv()
 
+from arize.otel import register
+
+# Register with Arize AX
+tracer_provider = register(
+    space_id=os.getenv("SPACE_ID"),      # Found in app space settings page
+    api_key=os.getenv("API_KEY"),        # Found in app space settings page
+    project_name="RCA_Helper"  # Name this whatever you prefer
+)
+
+# Import and configure the automatic instrumentor from OpenInference
+from openinference.instrumentation.google_adk import GoogleADKInstrumentor
+
+# Finish automatic instrumentation
+GoogleADKInstrumentor().instrument(tracer_provider=tracer_provider)
+
 APP_NAME = os.getenv("APP_NAME", "RootCause_Analyzer")
 USER_ID = os.getenv("USER_ID", "user_1234")
 SESSION_ID = os.getenv("SESSION_ID", "session_1234")
@@ -34,6 +50,13 @@ retry_config = types.HttpRetryOptions(
     http_status_codes=[429, 500, 503, 504],  # Retry on these HTTP errors
 )
 
+thinking_config = types.ThinkingConfig(
+    include_thoughts=True,
+    thinking_budget=256
+)
+planner=BuiltInPlanner(
+    thinking_config=thinking_config
+)
 ## Define agents
 itsm_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
@@ -121,11 +144,12 @@ Available specialized agents:
 2. 'farewell_agent': Use this agent when the user indicates they are leaving or ending the conversation
 3. 'itsm_agent': Use this agent for ITSM-related activities (ticket checks, change verification, ticket creation, CI searches)
 4. 'transaction_agent': Use this agent for queries about transactions and transaction details
-5. 'logs_agent': Use this agent when the user requests device transaction logs
+5. 'logs_agent': Use this agent when the user requests device server logs
 
 Analyze each user query carefully and delegate to the most appropriate agent based on their request.
 If a request does not match any agent's capabilities, politely inform the user that you cannot assist with that request.
 Do not attempt to fulfill requests outside the scope of the available agents.""",
+    planner=planner,
     sub_agents=[greeting_agent, farewell_agent, itsm_agent, transaction_agent, logs_agent],
     output_key="last_response",
     before_model_callback=block_keyword_guardrail,
