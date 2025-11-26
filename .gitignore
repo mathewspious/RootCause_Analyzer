@@ -23,5 +23,7 @@ build/
 # Ruff cache
 .ruff_cache/
 
+agent.tar
+
 # git-lfs (if using)
 EOF
