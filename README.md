@@ -383,4 +383,4 @@ For issues, feature requests, or feedback, please [create an issue] or [submit a
 
 **Version**: 1.0.0  
 **Last Updated**: November 2025  
-**Built for**: Hackathon Challenge – IT Operations & Intelligent Automation
+**Built for**: Hackathon Challenge – Enterprise Automation
