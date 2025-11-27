@@ -235,6 +235,13 @@ SESSION_ID=session_1234
 
 ---
 
+## Demo
+
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=R7Ktnc8FgKA">
+    <img src="images/rca_analyser.png" alt="RootCause Analyzer Demo" width="640" height="360">
+  </a>
+</div>
 ## Usage Examples
 ### ITSM Queries
 ```
