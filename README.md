@@ -242,6 +242,7 @@ SESSION_ID=session_1234
     <img src="images/rca_analyser.png" alt="RootCause Analyzer Demo" width="640" height="360">
   </a>
 </div>
+
 ## Usage Examples
 ### ITSM Queries
 ```
